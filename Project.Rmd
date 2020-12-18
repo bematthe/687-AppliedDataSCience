@@ -1,0 +1,143 @@
+---
+title: "Project"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(rjson)
+library(tidytext)
+library(tibble)
+library(dplyr)
+library(qdap)
+library(tm)
+library(text2vec)
+library(textmineR)
+library(cluster)
+
+readJson <- fromJSON(file = "C:\\Users\\dlvpr\\Desktop\\Corpus.json")
+
+class(readJson)
+
+HJson <- readJson['Headlines']
+HJson <- HJson[[1]][]
+h <- unlist(HJson)
+
+
+#Make a dataframe for plotting the content later
+
+news_df  <-  as.data.frame(matrix(unlist(readJson), nrow=length(unlist(readJson[1]))), stringsAsFactors = FALSE)
+
+colnames(news_df) <- c('Title', 'Author', 'Content')
+
+head(news_df)
+
+
+
+AJson <- readJson['Author']
+AJson <- AJson[[1]][]
+a <- unlist(AJson)
+
+
+TJson <- readJson['Title']
+TJson <- TJson[[1]][]
+t <- unlist(TJson)
+
+###Remove the stopwords
+
+rm_words <- function(string, words) {
+    stopifnot(is.character(string), is.character(words))
+    string <- gsub('\n','',string)
+    string <- gsub('"', '',string)
+    string <- gsub('&', '', string)
+    string <- gsub('-', '', string)
+    words <- rbind(words, c('sure','said','even', 'get', 'so', 'say'))
+    spltted <- strsplit(string, " ", fixed = TRUE) 
+    vapply(spltted, function(x) paste(x[!tolower(x) %in% words], collapse = " "), character(1))
+}
+
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en"), "also", "can","one"))
+  return(corpus)
+}
+
+
+#Cleanup Iteration #1
+headlines <- rm_words(tolower(h), tm::stopwords("en"))
+
+###Clean corpus Iteration#2
+
+bow <- tm::VectorSource(headlines)
+headlines <- tm::VCorpus(bow)
+headlines <- clean_corpus(headlines)
+
+
+#Term Document matrix - TFIDF
+
+corpus_dtm <- DocumentTermMatrix(headlines)
+corpus_m <- as.matrix(corpus_dtm)
+
+#### Generate TFIDF matrix
+#Method # 1
+tf_mat <- TermDocFreq(dtm = corpus_m)
+#str(tf_mat) 
+#head(tf_mat[ order(tf_mat$term_freq, decreasing = TRUE) , ], 10)
+
+
+#Method #2
+tdm <- tm::DocumentTermMatrix(clean_corp) 
+tdm.tfidf <- tm::weightTfIdf(tdm)
+tfidf_mat <- tm::removeSparseTerms(tdm.tfidf, 0.999) 
+tfidf.matrix <- as.matrix(tdm.tfidf) 
+
+#Cosine Similarity matrix
+dist_matrix = proxy::dist(tfidf.matrix, method = "cosine") 
+csim <- as.dist(1-dist_matrix)
+
+
+# Clustering
+kmeans_c <- kmeans(tfidf.matrix, 10) 
+cls <- data.frame(kmeans_c$cluster)
+dff <- merge(news_df, cls, by = 0, all= TRUE)
+
+
+dff[dff$kmeans_c.cluster == 10,]$Title
+
+#Print word clouds
+
+library(wordcloud)
+dtm <- TermDocumentMatrix()
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+head(d, 10)
+
+
+
+
+
+kmeans_c$centers
+hc <- hclust(csim, "ward.D")
+plot(hc, main = "Hierarchical clustering of 100 News Articles",
+     ylab = "", xlab = "", yaxt = "n")
+rect.hclust(hc, 10, border = "red")
+
+
+#Frequent terms
+
+term_count <- freq_terms(clean_corp[[1]][1], 10)
+
+plot(term_count)
+
+
+
+
+
+```

@@ -1,0 +1,268 @@
+---
+title: "Untitled"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(rjson)
+library(tidytext)
+library(tibble)
+library(dplyr)
+library(qdap)
+library(tm)
+library(text2vec)
+library(textmineR)
+library(cluster)
+library(wordcloud)
+library(ggplot2)
+library(tidyr)
+library(proxy)
+library(SnowballC)
+library(textstem)
+library(stringr)
+library(qdap)
+fname <- c("wordCloud_Cluster1.png", "wordCloud_Cluster2.png", "wordCloud_Cluster3.png","wordCloud_Cluster4.png", "wordCloud_Cluster5.png", "wordCloud_Cluster6.png","wordCloud_Cluster7.png", "wordCloud_Cluster8.png", "wordCloud_Cluster9.png","wordCloud_Cluster10.png", "wordCloud_Cluster11.png", "wordCloud_Cluster12.png","wordCloud_Cluster13.png", "wordCloud_Cluster14.png", "wordCloud_Cluster15.png", "wordCloud_Cluster16.png", "wordCloud_Cluster17.png", "wordCloud_Cluster18.png", "wordCloud_Cluster19.png", "wordCloud_Cluster20.png")
+names(fname) <- c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20)
+
+fn <- c("KeyWords_Cluster1.png", "KeyWords_Cluster2.png", "KeyWords_Cluster3.png","KeyWords_Cluster4.png", "KeyWords_Cluster5.png", "KeyWords_Cluster6.png","KeyWords_Cluster7.png", "KeyWords_Cluster8.png", "KeyWords_Cluster9.png","KeyWords_Cluster10.png", "KeyWords_Cluster11.png", "KeyWords_Cluster12.png","KeyWords_Cluster13.png", "KeyWords_Cluster14.png", "KeyWords_Cluster15.png", "KeyWords_Cluster16.png", "KeyWords_Cluster17.png", "KeyWords_Cluster18.png", "KeyWords_Cluster19.png", "KeyWords_Cluster20.png")
+names(fn) <- c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20)
+
+
+wcloud <- function(d, factorC, i){
+  png(fname[i], width=12,height=8, units='in', res=300)
+  wordcloud(words = d$word, freq = d$freq, min.freq = 0,           max.words=100, random.order=FALSE, rot.per=0.35,            colors=brewer.pal(8, "Dark2"))
+}
+
+nclusters <- 20
+
+#Read the files
+
+#readJson <- fromJSON(file = "C:\\Users\\dlvpr\\Desktop\\Corpus.json")
+
+readJson <- read.csv("C:\\Users\\dlvpr\\Desktop\\Corpus_test.csv")
+
+HJson <- readJson['Headlines']
+#HJson <- HJson[[1]][]
+article <- unlist(HJson)
+
+AJson <- readJson['Author']
+#AJson <- AJson[[1]][]
+a <- unlist(AJson)
+
+
+TJson <- readJson['Title']
+#TJson <- TJson[[1]][]
+title <- unlist(TJson)
+# 
+# 
+#article <- c("My name is Raaji Prasad", "My name is Raaji is good Raaji", "Are you good Prasad Raaji", "It is a wonderful world", "womderful world is", "stupid world wonders", "Wonderful things cause wonder world", "there are many many wonderful in things called life world", "CNN sucks at news MSN ()")
+#title <- c('1','2','3', '4', '5', '6', '7', '8', '9')
+
+article <- tolower(article)
+
+
+
+stopwords_regex <- stopwords('en')
+newW <- c('msn', 'cnn', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'many', 'cause', '(', ')','[',']')
+
+stopwords_regex <- c(stopwords_regex, newW)
+
+stopwords_regex <- paste(stopwords_regex, collapse = '\\b|\\b')
+stopwords_regex <- paste0('\\b', stopwords_regex, '\\b')
+documents <- str_replace_all(article, stopwords_regex, '')
+dst <- wordStem(documents)
+dst <- lemmatize_strings(dst)
+#Tibble with article and titles
+art_tib <- tibble(title, article = dst)
+
+
+#Manual calculations and tm library
+
+#Do this the manual way
+#Tokenize the articles
+
+article_words <- art_tib %>%
+  unnest_tokens(word, article) %>%
+  count(title, word, sort = TRUE)
+
+#Add total word count to the tibble for each document
+total_words <- article_words %>% 
+  group_by(title) %>% 
+  summarize(total = sum(n))
+
+#Create a new tibble
+
+wtibble <- left_join(article_words, total_words)
+
+
+total_word_doc <- article_words %>% 
+  group_by(word) %>% 
+  count(title) %>% summarise(df = sum(n))
+
+
+ar_tibble <- left_join(article_words,total_words)
+ar_tibble <- left_join(ar_tibble, total_word_doc,by = "word")
+
+#Calulate Term Frequency, inverse document frequence and tf-idf
+
+term_freq <- ar_tibble %>% group_by(title) %>% mutate(tf = n/total, idf = log(length(article)/df), tf_idf = tf*idf)
+
+#convert the tibble into a df for kmeans
+kmeans_mat <- as.data.frame(term_freq)
+#Choose the attributes requires for kmeans
+df <- data.frame(kmeans_mat['title'], kmeans_mat['word'], kmeans_mat['tf'],  kmeans_mat['df'], kmeans_mat['idf'])
+colnames(df) <- c('title', 'term', 'term_freq','doc_freq', 'idf')
+df$doc_freq <- as.double(df$doc_freq)
+
+
+
+#See how many clusters may be required
+
+wssplot <- function(data, nc=15, seed=123){
+               wss <- (nrow(data)-1)*sum(apply(data,2,var))
+               for (i in 2:nc){
+                    set.seed(seed)
+                    wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+                plot(1:nc, wss, type="b", xlab="Number of groups",
+                     ylab="Sum of squares within a group")}
+
+
+wssplot(df[,3:5], nc = nclusters)
+
+#K means clustering
+
+kmeans_c <- kmeans(df[,3:5], nclusters)
+articles_c <- art_tib$article
+
+#Create a corpus where each article is treated as a vector
+
+#Matrix of documents and terms
+tdm <- DocumentTermMatrix(Corpus(VectorSource(articles_c)))
+
+#Weighted TFIDF for the collection of documents
+
+tfidf_t <- weightTfIdf(tdm)
+
+#Verify the dim names
+#tdm$dimnames
+
+#Remove any sparse terms
+tfidf_t <- removeSparseTerms(tfidf_t, 0.99) 
+
+#Convert the tfidf df to matrix
+tfidf_mat <- as.matrix(tfidf_t) 
+
+#Lets plot to see how these groups look
+
+#To plot the articles and centroids, calculte the cosine distrance
+distance_mat = dist(tfidf_mat, method = "cosine")
+
+clus <- kmeans_c$cluster 
+
+points <- cmdscale(distance_mat, k = nclusters) 
+
+palette <- colorspace::diverge_hcl(nclusters) # Creating a color palette 
+
+previous.par <- par(mfrow=c(2,2), mar = rep(1.5, 4)) 
+ 
+plot(points, main = 'K-Means clustering', col = as.factor(clus), 
+     mai = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), 
+     xaxt = 'n', yaxt = 'n', xlab = '', ylab = '') 
+
+
+#using text mining library and Weighted TFIDF
+
+
+#See how many clusters may be required
+
+wssplot <- function(data, nc=15, seed=123){
+               wss <- (nrow(data)-1)*sum(apply(data,2,var))
+               for (i in 2:nc){
+                    set.seed(seed)
+                    wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+                plot(1:nc, wss, type="b", xlab="Number of groups",
+                     ylab="Sum of squares within a group")}
+
+wssplot(tfidf_mat, nc = nclusters)
+
+#Based on the inspection of the plot above, 20 clusters may be able to describe 99% of the data
+
+kmeans_c <- kmeans(tfidf_mat, nclusters) 
+
+
+#To plot the articles and centroids, calculte the cosine distrance
+
+distance_mat = dist(tfidf_mat, method = "cosine")
+
+clus <- kmeans_c$cluster 
+
+points <- cmdscale(distance_mat, k = nclusters) 
+
+palette <- colorspace::diverge_hcl(nclusters) # Creating a color palette 
+
+previous.par <- par(mfrow=c(2,2), mar = rep(1.5, 4)) 
+ 
+plot(points, main = 'K-Means clustering', col = as.factor(clus), 
+     mai = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), 
+     xaxt = 'n', yaxt = 'n', xlab = '', ylab = '') 
+
+
+cld <- data.frame(kmeans_c$cluster, art_tib$article, art_tib$title, stringsAsFactors = FALSE)
+
+#What do clusters look like
+
+plot(cld %>% group_by(kmeans_c.cluster) %>% count(art_tib.title) %>% summarise(sum(n)), ylab = "Number of articles", xlab = "Cluster")
+
+#Lets examine the clusters
+
+
+for(i in unique(cld$kmeans_c.cluster)){
+  headlines <- as.character(cld[cld$kmeans_c.cluster == i,]$art_tib.article)
+   titles <- as.character(cld[cld$kmeans_c.cluster == i,]$art_tib.title)
+headlines <- str_replace_all(headlines, stopwords_regex, '')
+  bow <- VectorSource(headlines)
+  png(fn[i], width=12,height=8, units='in', res=300)
+  print(titles)
+  plot(freq_terms(bow, 10), title = paste('------------Cluster',as.character(i),'----------------','\n','--------------Top 10 Words----------------'))
+  paste('\n','-----------------word cloud-------------------')
+}  
+
+
+
+for(i in unique(cld$kmeans_c.cluster)){
+  headlines <- as.character(cld[cld$kmeans_c.cluster == i,]$art_tib.article)
+   titles <- as.character(cld[cld$kmeans_c.cluster == i,]$art_tib.title)
+headlines <- str_replace_all(headlines, stopwords_regex, '')
+ bow <- VectorSource(headlines)
+  headlines <- VCorpus(bow)
+  dtm <- TermDocumentMatrix(headlines)
+  m <- as.matrix(dtm)
+  v <- sort(rowSums(m),decreasing=TRUE)
+  d <- data.frame(word = names(v),freq=v, stringsAsFactors = FALSE)
+  wcloud(d,0,i)
+}
+
+
+#Hierarchical clustering
+
+hclust_avg <- hclust(distance_mat, method = 'average')
+png("hclust.png", width=12,height=8, units='in', res=300)
+plot(hclust_avg)
+
+
+
+
+```
